@@ -66,6 +66,19 @@ public class IFDSAnalysisProblem extends
 
     @Override
     protected Map<Local, String> createZeroValue() {
+	/* This works for now because we're only tracking Strings. 
+	 * Similar to other comments, I think we may want to encapsulate the "value"
+	 * as an Object rather than using "".  If we were to expand this to also track
+	 * ints, the "" string wouldn't be a good zero.
+	 *
+	 * It might be worth starting out with an type heirarchy like:
+	 * ValueObject
+	 *   - TopValue
+	 *   - BottomValue
+	 *   - StringValue
+	 * for now and see if that can be made to work.  That allows adding new
+	 * types of values (IntValue, etc) later.
+	 */
         Map<Local, String> entryMap = new HashMap<>();
         for (Local l : entryMethod.getBody().getLocals()) {
             entryMap.put(l, "");
@@ -93,6 +106,9 @@ public class IFDSAnalysisProblem extends
 
                         Set<Map<Local,String>> res = new LinkedHashSet<>();
                         StringFoldingVisitor visitor = new StringFoldingVisitor(source);
+			// What if it's a getstatic SomeOtherClass.foo?  Wouldn't we need to walk the definingClass of
+			// the field's <clinit> to find the right value?
+			// And also, only for static final fields.
                         if (definitionStmt.getRightOp() instanceof JStaticFieldRef fieldRef) {
                             visitor = new StringFoldingVisitor(source, clinit);
                         }
@@ -180,6 +196,7 @@ public class IFDSAnalysisProblem extends
                 }
             }
         }
+	// What does this do?  Good place for a descriptive comment =)
         return KillAll.v();
     }
 
@@ -190,6 +207,17 @@ public class IFDSAnalysisProblem extends
         return new FlowFunction<Map<Local, String>>() {
             @Override
             public Set<Map<Local, String>> computeTargets(Map<Local, String> source) {
+
+		// Is this correct?  I thought CallToReturnFlow was the set of values
+		// that was propagated over a call without peeking into the call. Should
+		// this not propagate the set of locals from before the call to after?
+		// ie:
+		// local a = ...
+		// local b = ...
+		// invokevirt M.c()
+		// <-- propagate a & b here since we know they are unchanged?
+		//
+		// Or am I misunderstanding?
 
                 Set<Map<Local,String>> res = new LinkedHashSet<>();
                 StringFoldingVisitor visitor = new StringFoldingVisitor(source);

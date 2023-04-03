@@ -20,13 +20,15 @@ import java.util.Map;
 
 public class StringFoldingVisitor implements StmtVisitor {
 
-    private static final String TOP = "*";
+    private static final String TOP = "*";		// What if the local actually holds a String with the value "*"?
     private static final String SB_APPEND = "<java.lang.StringBuilder: java.lang.StringBuilder append(java.lang.String)>";
     private static final String SB_TO_STRING = "<java.lang.StringBuilder: java.lang.String toString()>";
     private static final String SB_INIT_PLAIN = "<java.lang.StringBuilder: void <init>()>";
     private static final String SB_INIT_STR = "<java.lang.StringBuilder: void <init>(java.lang.String)>";
     private static final String STRING_CONCAT = "<java.lang.String: java.lang.String concat(java.lang.String)>";
 
+    // is String the best thing to use for the mapping here?  Would it be better to 
+    // use an internal class to propagate the String contents around?
     private Map<Local, String> setIn;
     private Map<Local, String> setOut;
 
@@ -58,6 +60,7 @@ public class StringFoldingVisitor implements StmtVisitor {
         if (AbstractInstanceInvokeExpr.class.isAssignableFrom(stmt.getInvokeExpr().getClass())) {
             AbstractInstanceInvokeExpr iExpr = (AbstractInstanceInvokeExpr) stmt.getInvokeExpr();
             // currently, only support for: append, toString and init for StringBuilder.
+	    // And concat given STRING_CONCAT?
             stringBuilderOrStringJavaLang(iExpr, iExpr.getBase());
 
         }
@@ -70,6 +73,9 @@ public class StringFoldingVisitor implements StmtVisitor {
         if (iExpr instanceof AbstractInstanceInvokeExpr exp) {
             lBase = exp.getBase();
         }
+	// Why does one check the full toString and the other just the name?  Supporting multiple forms of CONCAT?
+	// Depending on the format of toString is usually pretty brittle.  Better to depend on methods that have a more
+	// defined contract (like getName(), getSignature(), etc)
         if (iMethod.toString().equals(SB_APPEND) || iMethod.getName().equals(STRING_CONCAT)) {
             Value arg = iExpr.getArg(0);
             String toAppendStr = stringBuilderParamValue(arg);
@@ -113,6 +119,13 @@ public class StringFoldingVisitor implements StmtVisitor {
     }
 
 
+    /**
+     * Similar question applies to many places about the use of ::isAssignableFrom.
+     * The reason I ask about it is that it's harder to follow the code when it isn't
+     * written as idiomatic java unless there's a reason to use different patterns.
+     * If there is, it helps to have a comment somewhere to say why.
+     *
+     */
     @Override
     public void caseAssignStmt(JAssignStmt<?, ?> stmt) {
         defaultCaseStmt(stmt);
@@ -130,10 +143,16 @@ public class StringFoldingVisitor implements StmtVisitor {
             } else if (StringConstant.class.isAssignableFrom(right.getClass())) {
                 // this time the new value of lLocal is the constant string
                 setOut.put(lLocal, ((StringConstant) right).getValue());
+		// What is the difference between this case and the one before?  In either case, 
+		// we're assigning what was on the right to the local on the left?  I guess in this
+		// one we're only assigning the value from the right?  Not 100% clear on why that
+		// matters here though.
             } else if (JNewExpr.class.isAssignableFrom(right.getClass())) {
                 JNewExpr newExpr = (JNewExpr) right;
                 if (newExpr.getType().toString().equals("java.lang.StringBuilder")) {
                     setOut.putAll(setIn);
+		    // Why does a "new StringBuilder" call pass through all the locals?
+		    // The setOut == the setIn, correct?
                 }
             } else if (JInstanceFieldRef.class.isAssignableFrom(right.getClass())) {
 
@@ -161,6 +180,14 @@ public class StringFoldingVisitor implements StmtVisitor {
         }
     }
 
+    /**
+     * Should this be limited to static final fields?  We don't know at the time of the static
+     * analysis if the value written to a non-final field has been changed outside of the
+     * <clinit> method.
+     *
+     * How are static final fields set with ConstantValue_attribute handled? 
+     * ie: static final FOO = "Foo"; doesn't need to be set in a <clinit>
+     */
     private String lookUpFieldRef(JFieldRef fRef) {
 
         for (Stmt u : clinit.getBody().getStmts()) {
@@ -169,6 +196,14 @@ public class StringFoldingVisitor implements StmtVisitor {
                 Value left = aStmt.getLeftOp();
                 Value right = aStmt.getRightOp();
 
+		/* Why use Class::isAssignableFrom rather than instanceof? 
+		 * ie: left instanceof JFieldRef?
+		 * The pattern matching for instanceof makes it even nicer:
+		 *    left instanceof JFieldRef aFieldRef
+		 * and avoids the need to cast afterwards.
+		 *
+		 * If there's a reason to use the isAssignableFrom pattern I'm not seeing?
+		 */
                 if (JFieldRef.class.isAssignableFrom(left.getClass())) {
                     JFieldRef aFieldRef = (JFieldRef) left;
                     // If the static field is the one that we are looking for...
@@ -206,9 +241,12 @@ public class StringFoldingVisitor implements StmtVisitor {
 
             if (IdentityRef.class.isAssignableFrom(right.getClass())) {
                 // the local is not a constant and depends on external input
+		// I don't understand what the comment is trying to say here.
                 setOut.put(lLocal, setIn.get(lLocal));
             }
         }
+	// Don't we need to poison the Local here (set it to TOP) if it has had
+	// soemthing other than a String assigned to it?
     }
 
     @Override
